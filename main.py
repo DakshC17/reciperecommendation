@@ -31,12 +31,13 @@ async def groq_chat(system_prompt: str, user_prompt: str):
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
-        ]
+        ],
+        "response_format": {"type": "json_object"}  # This ensures JSON output
     }
 
     print("📤 Sending request to Groq API:", json.dumps(payload, indent=2))
 
-    async with httpx.AsyncClient(timeout=15) as client:  # Added timeout
+    async with httpx.AsyncClient(timeout=15) as client:
         try:
             response = await client.post(
                 "https://api.groq.com/openai/v1/chat/completions",
@@ -49,7 +50,13 @@ async def groq_chat(system_prompt: str, user_prompt: str):
             print("📥 Groq API Response:", json.dumps(data, indent=2))
 
             if "choices" in data and data["choices"]:
-                return data["choices"][0]["message"]["content"]
+                content = data["choices"][0]["message"]["content"]
+                try:
+                    # Try to parse immediately to catch JSON issues early
+                    json.loads(content)
+                    return content
+                except json.JSONDecodeError as e:
+                    raise HTTPException(status_code=500, detail=f"Groq API returned invalid JSON: {str(e)}")
             else:
                 raise HTTPException(status_code=500, detail="Empty response from Groq API.")
 
@@ -60,76 +67,94 @@ async def groq_chat(system_prompt: str, user_prompt: str):
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Unexpected Error: {str(e)}")
 
-
 async def extract_json(response: str):
-    """Extracts valid JSON from a response using regex."""
-    json_match = re.search(r'\{.*\}', response, re.DOTALL)
-    if json_match:
-        json_response = json_match.group(0)
+    """Extracts and validates JSON from a response."""
+    try:
+        # First try to parse the entire response as JSON
+        return json.loads(response)
+    except json.JSONDecodeError:
+        # If that fails, try to extract JSON from the response
         try:
-            return json.loads(json_response)
-        except json.JSONDecodeError:
-            raise HTTPException(status_code=500, detail="Groq API returned malformed JSON.")
-    raise HTTPException(status_code=500, detail="Could not extract JSON from Groq API response.")
-
+            # Improved regex pattern to handle nested structures
+            json_pattern = r'```json\n({.*?})\n```|```\n({.*?})\n```|({.*})'
+            matches = re.findall(json_pattern, response, re.DOTALL)
+            
+            # Flatten matches and filter out empty groups
+            possible_jsons = [m for group in matches for m in group if m]
+            
+            if possible_jsons:
+                # Try each possible JSON match until one works
+                for possible_json in possible_jsons:
+                    try:
+                        return json.loads(possible_json)
+                    except json.JSONDecodeError:
+                        continue
+            
+            # If no match found in code blocks, try to find the outermost JSON
+            json_match = re.search(r'\{.*\}', response, re.DOTALL)
+            if json_match:
+                return json.loads(json_match.group(0))
+            
+            raise HTTPException(status_code=500, detail="No valid JSON found in response.")
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to extract JSON: {str(e)}")
 
 async def filter_food_items(items: list[str]):
     """Filters food-related items using Groq's API and extracts valid JSON."""
-    system_prompt = "You are an expert in classifying grocery items."
-    user_prompt = f"""
-    Classify these grocery items into **food-related** and **non-food items**: {', '.join(items)}.
-
-    **Rules:**
-    - ✅ **Food-related:** Edible ingredients, cooking essentials.
-    - ❌ **Non-food:** Household items, medicines, toiletries.
-
-    **Output JSON Format (No extra text!):**
-    {{
-        "food_items": ["food1", "food2"],
-        "non_food_items": ["nonfood1", "nonfood2"]
-    }}
-    """
+    system_prompt = """You are an expert in classifying grocery items. 
+    Always respond with valid JSON only, no additional text or explanations.
+    The JSON must follow this exact structure:
+    {
+        "food_items": ["item1", "item2"],
+        "non_food_items": ["item3", "item4"]
+    }"""
     
+    user_prompt = f"""Classify these items into food-related and non-food items: {json.dumps(items)}.
+    Rules:
+    - Food-related: Edible ingredients, cooking essentials
+    - Non-food: Household items, medicines, toiletries
+    Respond ONLY with the JSON output, no additional text or explanations."""
+
     response = await groq_chat(system_prompt, user_prompt)
     return await extract_json(response)
-
 
 async def get_recipes(food_items: list[str]):
     """Fetches recipes using filtered food items."""
     if not food_items:
-        return {"recipes": [], "additional_ingredients": []}  # Return empty list if no food items
+        return {"recipes": [], "additional_ingredients": []}
 
-    system_prompt = "You are an expert chef providing detailed recipes."
-    user_prompt = f"""
-    Generate **3 recipes** using these ingredients: {', '.join(food_items)}.
+    system_prompt = """You are an expert chef providing detailed recipes. 
+    Always respond with valid JSON only, no additional text or explanations.
+    The JSON must follow this exact structure:
+    {
+        "recipes": [
+            {
+                "name": "Recipe Name",
+                "ingredients": [
+                    {"name": "ingredient1", "quantity": "1 cup"},
+                    {"name": "ingredient2", "quantity": "2 tbsp"}
+                ],
+                "instructions": ["Step 1", "Step 2"],
+                "servings": 2,
+                "prep_time": "10 mins",
+                "cook_time": "20 mins",
+                "missing_ingredients": ["ingredient3"]
+            }
+        ],
+        "additional_ingredients": ["ingredient3", "ingredient4"]
+    }"""
 
-    **Each recipe must have:**
-    - Name
-    - Ingredients with quantity
-    - Cooking instructions
-    - Missing ingredients
+    user_prompt = f"""Generate 3 detailed recipes using these ingredients: {json.dumps(food_items)}.
+    Each recipe must include:
+    1. Recipe Name
+    2. Ingredients List with precise quantities
+    3. Step-by-Step Cooking Instructions
+    4. Missing Ingredients
+    5. Serving Size & Time Estimates
+    Respond ONLY with the JSON output, no additional text or explanations."""
 
-    **Output JSON Format:**
-    {{
-      "recipes": [
-        {{
-          "name": "Recipe 1",
-          "ingredients": [
-            {{"name": "ingredient_1", "quantity": "X unit"}},
-            {{"name": "ingredient_2", "quantity": "Y unit"}}
-          ],
-          "instructions": "Step 1: ... Step 2: ...",
-          "missing_ingredients": ["ingredient_x"]
-        }},
-        ...
-      ],
-      "additional_ingredients": ["ingredient_x", "ingredient_y"]
-    }}
-    """
-    
     response = await groq_chat(system_prompt, user_prompt)
     return await extract_json(response)
-
 
 @app.post("/suggest-recipes")
 async def suggest_recipes(grocery_list: GroceryList):
