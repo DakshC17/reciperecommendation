@@ -111,9 +111,32 @@ async def filter_food_items(items: list[str]):
     
     user_prompt = f"""Classify these items into food-related and non-food items: {json.dumps(items)}.
     Rules:
-    - Food-related: Edible ingredients, cooking essentials
-    - Non-food: Household items, medicines, toiletries
-    Respond ONLY with the JSON output, no additional text or explanations."""
+    Food-related – Items meant for human consumption or direct use in cooking.
+
+                    Subcategories:
+
+                    Ingredients (flour, sugar, eggs)
+
+                    Prepared foods (bread, canned soup)
+
+                    Beverages (milk, coffee)
+
+                    Condiments & Spices (ketchup, salt)
+
+                    Cooking essentials (olive oil, baking soda*)
+
+    Non-food – Household, medicinal, or personal care items not meant for eating.
+
+                    Subcategories:
+
+                    Household supplies (laundry detergent, paper towels)
+
+                    Medicines & Health (bandages, cough syrup)
+
+                    Toiletries (shampoo, toothpaste)
+
+                    Pet care (dog food*, cat litter)
+                    Respond ONLY with the JSON output, no additional text or explanations."""
 
     response = await groq_chat(system_prompt, user_prompt)
     return await extract_json(response)

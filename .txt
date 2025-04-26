@@ -1,0 +1,30 @@
+response = await groq_chat(system_prompt, user_prompt)
+    return await extract_json(response)
+
+
+@app.post("/suggest-recipes")
+async def suggest_recipes(grocery_list: GroceryList):
+    """Filters food items and fetches recipes in parallel."""
+    try:
+        # First, filter food items
+        food_items_result = await filter_food_items(grocery_list.items)
+        food_items = food_items_result.get("food_items", [])
+        non_food_items = food_items_result.get("non_food_items", [])
+
+        if not food_items:
+            raise HTTPException(status_code=400, detail="No food-related items found.")
+
+        # Fetch recipes using filtered food items
+        recipes_result = await get_recipes(food_items)
+
+        return {
+            "filtered_food_items": food_items,
+            "non_food_items": non_food_items,
+            "recipes": recipes_result.get("recipes", []),
+            "additional_ingredients": recipes_result.get("additional_ingredients", [])
+        }
+
+    except HTTPException as e:
+        raise e  # Re-raise known HTTP errors
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
