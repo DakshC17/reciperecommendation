@@ -167,13 +167,13 @@ async def get_recipes(food_items: list[str]):
         "additional_ingredients": ["ingredient3", "ingredient4"]
     }"""
 
-    user_prompt = f"""Generate 3 detailed recipes using these ingredients: {json.dumps(food_items)}.
+    user_prompt = f"""Generate 3 detailed Indian recipes and some regional indian recipes using these ingredients: {json.dumps(food_items)}.
     Each recipe must include:
     1. Recipe Name
     2. Ingredients List with precise quantities
-    3. Step-by-Step Cooking Instructions
+    3. Step-by-Step Cooking Instructions must be clear and easy to follow and detailed with each step
     4. Missing Ingredients
-    5. Serving Size & Time Estimates
+    5. Serving Size & Time Estimates (Time must be realistic no less time should be there by including all the time like soaking time, cooking time, etc.)
     Respond ONLY with the JSON output, no additional text or explanations."""
 
     response = await groq_chat(system_prompt, user_prompt)
